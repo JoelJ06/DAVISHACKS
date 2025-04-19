@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QPushBut
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QImage, QPixmap
 import numpy as np
+import pyautogui
 
 class BlinkDetector(QWidget):
     def __init__(self):
@@ -54,6 +55,7 @@ class BlinkDetector(QWidget):
                     if not self.is_blinking:
                         self.blink_count += 1
                         self.blink_label.setText(f'Blinks: {self.blink_count}')
+                        pyautogui.click()  # Simulate left mouse click on blink
                         self.is_blinking = True
                 else:
                     self.is_blinking = False
