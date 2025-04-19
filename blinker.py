@@ -7,33 +7,6 @@ from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QPen
 import numpy as np
 import pyautogui
 
-class GazeOverlay(QMainWindow):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.gaze_pos = None
-        screen = QApplication.primaryScreen().geometry()
-        self.setGeometry(screen)
-        self.showFullScreen()
-        self.hide()
-
-    def set_gaze(self, pos):
-        self.gaze_pos = pos
-        self.update()
-
-    def paintEvent(self, event):
-        if self.gaze_pos:
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.Antialiasing)
-            pen = QPen(QColor(0, 255, 0, 180), 4)
-            painter.setPen(pen)
-            x, y = self.gaze_pos
-            painter.drawEllipse(x-15, y-15, 30, 30)
-            painter.drawLine(x-25, y, x+25, y)
-            painter.drawLine(x, y-25, x, y+25)
-
 class BlinkDetector(QWidget):
     def __init__(self):
         super().__init__()
@@ -41,15 +14,23 @@ class BlinkDetector(QWidget):
         self.blink_count = 0
         self.is_blinking = False
         self.calibrated = False
-        self.calibration_points = []  # [(iris_x, iris_y), ...]
-        self.screen_points = []  # [(screen_x, screen_y), ...]
+        self.calibration_points = []
+        self.screen_points = []
         self.calibration_step = 0
-        self.gaze_history = []  # For smoothing
-        self.gaze_history_len = 5  # Number of points to average
-        self.smoothed_gaze = None  # For exponential smoothing
-        self.last_cursor_pos = None  # For movement threshold
-        self.move_threshold = 20  # Minimum pixels to move cursor
-        self.smoothing_alpha = 0.3  # Smoothing factor (0 < alpha < 1)
+        self.gaze_history = []
+        self.gaze_history_len = 5
+        self.smoothed_gaze = None
+        self.last_cursor_pos = None
+        self.move_threshold = 20
+        self.smoothing_alpha = 0.3
+        self.pause_on_still = True
+        self.still_threshold = 15  # pixels
+        self.still_time_required = 1.5  # seconds
+        self.last_still_time = None
+        self.is_paused = False
+        self.scroll_zone_height = 80  # pixels from top/bottom edge
+        self.scroll_delay = 0.7  # seconds to trigger scroll
+        self.last_scroll_time = 0
         self.init_ui()
         self.cap = cv2.VideoCapture(0)
         self.timer = QTimer()
@@ -77,7 +58,6 @@ class BlinkDetector(QWidget):
         self.layout().addWidget(self.settings_button)
         self.settings_window = None
         self.setFocusPolicy(Qt.StrongFocus)
-        self.overlay = GazeOverlay()
 
     def init_ui(self):
         self.image_label = QLabel()
@@ -136,28 +116,25 @@ class BlinkDetector(QWidget):
         return None
 
     def map_iris_to_screen(self, iris_x, iris_y):
-        # Simple linear mapping using calibration points
         if len(self.calibration_points) < 5:
             return None
-        # Use center and corners for bilinear interpolation
-        # Unpack calibration
         (tl, tr, br, bl, center) = self.calibration_points
         (stl, str_, sbr, sbl, sc) = self.screen_points
-        # Find weights for bilinear interpolation
-        # For simplicity, use average of x and y ratios
+        # Use min/max from calibration points for normalization
         min_x = min([p[0] for p in [tl, tr, br, bl]])
         max_x = max([p[0] for p in [tl, tr, br, bl]])
         min_y = min([p[1] for p in [tl, tr, br, bl]])
         max_y = max([p[1] for p in [tl, tr, br, bl]])
-        rx = 1 - ((iris_x - min_x) / (max_x - min_x) if max_x != min_x else 0.5)  # Invert X for correct direction
+        # Clamp iris_x and iris_y to calibration range
+        iris_x = max(min_x, min(max_x, iris_x))
+        iris_y = max(min_y, min(max_y, iris_y))
+        # Map normalized gaze to full screen
+        rx = 1 - ((iris_x - min_x) / (max_x - min_x) if max_x != min_x else 0.5)
         ry = (iris_y - min_y) / (max_y - min_y) if max_y != min_y else 0.5
-        # Interpolate screen position
-        sx = stl[0] * (1 - rx) * (1 - ry) + str_[0] * rx * (1 - ry) + sbr[0] * rx * ry + sbl[0] * (1 - rx) * ry
-        sy = stl[1] * (1 - rx) * (1 - ry) + str_[1] * rx * (1 - ry) + sbr[1] * rx * ry + sbl[1] * (1 - rx) * ry
-        # Optionally blend with center
-        sx = (sx + sc[0]) / 2
-        sy = (sy + sc[1]) / 2
-        return int(sx), int(sy)
+        screen_w, screen_h = pyautogui.size()
+        sx = int(rx * (screen_w - 1))
+        sy = int(ry * (screen_h - 1))
+        return sx, sy
 
     def update_frame(self):
         ret, frame = self.cap.read()
@@ -179,18 +156,32 @@ class BlinkDetector(QWidget):
                     iris_y = iris.y
                     mapped = self.map_iris_to_screen(iris_x, iris_y)
                     if mapped:
-                        # Exponential smoothing
+                        # Adaptive smoothing and dead zone
                         if self.smoothed_gaze is None:
                             self.smoothed_gaze = mapped
                         else:
-                            sx = int(self.smoothing_alpha * mapped[0] + (1 - self.smoothing_alpha) * self.smoothed_gaze[0])
-                            sy = int(self.smoothing_alpha * mapped[1] + (1 - self.smoothing_alpha) * self.smoothed_gaze[1])
-                            self.smoothed_gaze = (sx, sy)
-                        self.overlay.set_gaze(self.smoothed_gaze)
-                        self.overlay.show()
-                        # Only move cursor if moved enough
-                        if self.last_cursor_pos is None or (abs(self.smoothed_gaze[0] - self.last_cursor_pos[0]) > self.move_threshold or abs(self.smoothed_gaze[1] - self.last_cursor_pos[1]) > self.move_threshold):
-                            pyautogui.moveTo(self.smoothed_gaze[0], self.smoothed_gaze[1], duration=0.18)
+                            dx = mapped[0] - self.smoothed_gaze[0]
+                            dy = mapped[1] - self.smoothed_gaze[1]
+                            dist = (dx ** 2 + dy ** 2) ** 0.5
+                            dead_zone = 25
+                            if dist < dead_zone:
+                                pass
+                            else:
+                                alpha = min(0.85, max(self.smoothing_alpha, dist / 300))
+                                sx = int(alpha * mapped[0] + (1 - alpha) * self.smoothed_gaze[0])
+                                sy = int(alpha * mapped[1] + (1 - alpha) * self.smoothed_gaze[1])
+                                self.smoothed_gaze = (sx, sy)
+                        # Pause cursor if gaze is steady
+                        if self.last_cursor_pos is not None and abs(self.smoothed_gaze[0] - self.last_cursor_pos[0]) < self.still_threshold and abs(self.smoothed_gaze[1] - self.last_cursor_pos[1]) < self.still_threshold:
+                            if self.last_still_time is None:
+                                self.last_still_time = time.time()
+                            elif time.time() - self.last_still_time > self.still_time_required:
+                                self.is_paused = True
+                        else:
+                            self.last_still_time = None
+                            self.is_paused = False
+                        if not self.is_paused:
+                            pyautogui.moveTo(self.smoothed_gaze[0], self.smoothed_gaze[1], duration=0.08)
                             self.last_cursor_pos = self.smoothed_gaze
                 if ear < 0.21:
                     if not self.is_blinking:
@@ -208,7 +199,6 @@ class BlinkDetector(QWidget):
     def eye_aspect_ratio(self, face_landmarks, eye_indices):
         points = [face_landmarks.landmark[i] for i in eye_indices]
         p = lambda i: np.array([points[i].x, points[i].y])
-        # Compute EAR
         A = np.linalg.norm(p(1) - p(5))
         B = np.linalg.norm(p(2) - p(4))
         C = np.linalg.norm(p(0) - p(3))
@@ -231,11 +221,11 @@ class BlinkDetector(QWidget):
             self.settings_window.setWindowTitle('Settings')
             layout = QFormLayout()
             dwell_spin = QDoubleSpinBox()
-            dwell_spin.setValue(self.dwell_time)
+            dwell_spin.setValue(1.0)
             dwell_spin.setMinimum(0.2)
             dwell_spin.setMaximum(3.0)
             dwell_spin.setSingleStep(0.1)
-            dwell_spin.valueChanged.connect(lambda v: setattr(self, 'dwell_time', v))
+            dwell_spin.valueChanged.connect(lambda v: None)
             layout.addRow('Dwell Click Time (s):', dwell_spin)
             threshold_spin = QSpinBox()
             threshold_spin.setValue(self.move_threshold)
@@ -257,7 +247,6 @@ class BlinkDetector(QWidget):
         self.settings_window.show()
 
     def closeEvent(self, event):
-        self.overlay.close()
         self.cap.release()
         super().closeEvent(event)
 
