@@ -24,7 +24,7 @@ CHANNELS = 1
 RATE = 16000
 WAKE_WORD = "steven"
 SILENCE_THRESHOLD = int(os.getenv("SOUND_THRESHOLD"))  # Adjust based on your microphone and environment
-SILENCE_DURATION = 3.0   # Seconds of silence to end recording
+SILENCE_DURATION = 2.0   # Seconds of silence to end recording
 
 # Initialize ElevenLabs client
 client = ElevenLabs(
@@ -90,7 +90,7 @@ class VoiceAssistant:
                 
                 # Periodically recycle resources to prevent memory leaks
                 self.cycle_count += 1
-                if self.cycle_count > 1000:  # Every ~100 seconds
+                if self.cycle_count > 100:  # Every ~100 seconds
                     self.recycle_resources()
                     self.cycle_count = 0
                     

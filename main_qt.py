@@ -14,8 +14,7 @@ from PyQt5.QtCore import Qt, QSize
 
 from eye_widget import EyeTrackerWidget
 from hand_widget import HandTrackerWidget
-from unified_agent import UnifiedAgent
-
+import audio
 class ListeningOverlay(QToolButton):
     """An always‑on‑top “Steven is listening…” badge that ignores clicks."""
     def __init__(self):
@@ -74,9 +73,7 @@ class MainWindow(QMainWindow):
         # — always‑on‑top Steven badge —
         self.listen_overlay = ListeningOverlay()
 
-        # — start voice assistant in background —
-        self.unified_agent = UnifiedAgent()
-        threading.Thread(target=self.unified_agent.start, daemon=True).start()
+
 
         # — toolbar for switching modes —
         tb = QToolBar("Mode")
@@ -165,7 +162,6 @@ class MainWindow(QMainWindow):
         # clean up everything
         self.eye_tab.stop_tracking()
         self.hand_tab.stop_tracking()
-        self.unified_agent.stop()
         self.listen_overlay.hide()
         super().closeEvent(event)
 
