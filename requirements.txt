@@ -5,3 +5,6 @@ pyaudio>=0.2.11
 requests>=2.28.1
 elevenlabs>=0.0.1
 pydub>=0.25.1
+PyQt5>=5.15.0
+pyautogui>=0.9.53
+pymongo[srv]
