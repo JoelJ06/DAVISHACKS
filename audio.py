@@ -12,6 +12,7 @@ import queue
 import pyaudio
 import wave
 from elevenlabs import ElevenLabs
+import agent 
 
 # Load environment variables from .env file
 load_dotenv()
@@ -54,6 +55,7 @@ class VoiceAssistant:
         self.silent_chunks = 0
         self.chunks_per_second = RATE / CHUNK
         self.silent_chunks_threshold = int(SILENCE_DURATION * self.chunks_per_second)
+        self.gemini_agent = agent.geminiAgent()
         
     def transcribe_with_elevenlabs(self, audio_file):
         """Transcribe audio file using ElevenLabs API."""
@@ -261,7 +263,7 @@ class VoiceAssistant:
         
         # Clean up
         os.remove(temp_filename)
-        
+        self.gemini_agent.run()
         # Return to listening for wake word
         self.start_listening_for_wake_word()
 
