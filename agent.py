@@ -7,7 +7,7 @@ import subprocess
 from google import genai
 
 def extract_open_intents(transcript_path: str):
-    client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+    client = genai.Client(api_key="AIzaSyB35N83uAdd5cjwfXqkLH9T9_PhWHTMSb8")
     with open(transcript_path, 'r') as f:
         transcript = f.read().strip()
 
