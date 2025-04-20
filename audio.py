@@ -24,7 +24,7 @@ CHANNELS = 1
 RATE = 16000
 WAKE_WORD = "steven"
 SILENCE_THRESHOLD = int(os.getenv("SOUND_THRESHOLD"))  # Adjust based on your microphone and environment
-SILENCE_DURATION = 2.0   # Seconds of silence to end recording
+SILENCE_DURATION = 3.0   # Seconds of silence to end recording
 
 # Initialize ElevenLabs client
 client = ElevenLabs(

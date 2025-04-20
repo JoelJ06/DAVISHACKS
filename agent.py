@@ -16,7 +16,8 @@ class geminiAgent():
         
         system = (
             "You are an accessibility assistant.  Parse the user's transcript "
-            "and extract every command to open an application. Correct spelling if necessary. "
+            "and extract every command to open an application. Correct spelling if necessary, to the appropriate full application name."
+            "As an example, chrome should autocorrect to Google Chrome."
             "Return only a JSON object with two arrays: "
             "\"actions\": [...], \"apps\": [...]."
         )
