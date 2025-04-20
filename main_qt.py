@@ -10,9 +10,33 @@ class MainWindow(QMainWindow):
         self.resize(800, 600)
 
         tabs = QTabWidget()
-        tabs.addTab(EyeTrackerWidget(),  "Eye Control")
-        tabs.addTab(HandTrackerWidget(), "Hand Control")
+        self.eye_tab  = EyeTrackerWidget()
+        self.hand_tab = HandTrackerWidget()
+
+        tabs.addTab(self.eye_tab,  "Eye Control")
+        tabs.addTab(self.hand_tab, "Hand Control")
+        tabs.currentChanged.connect(self.on_tab_changed)
+
         self.setCentralWidget(tabs)
+        # start with eye‑tracking active:
+        self.eye_tab.start_tracking()
+
+    def on_tab_changed(self, index):
+        # stop both first…
+        self.eye_tab.stop_tracking()
+        self.hand_tab.stop_tracking()
+        # …then start only the newly selected one
+        if index == 0:
+            self.eye_tab.start_tracking()
+        else:
+            self.hand_tab.start_tracking()
+
+    def closeEvent(self, event):
+        # ensure cleanup
+        self.eye_tab.stop_tracking()
+        self.hand_tab.stop_tracking()
+        super().closeEvent(event)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
