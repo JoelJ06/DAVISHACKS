@@ -1,3 +1,5 @@
+# eye_widget.py
+
 import time
 import cv2
 import mediapipe as mp
@@ -19,7 +21,7 @@ class EyeTrackerWidget(QWidget):
         super().__init__()
         self.setFocusPolicy(Qt.StrongFocus)
 
-        # ─ Calibration ───────────────────────────────
+        # ─ Calibration state ─────────────────────────────
         self.calibrated = False
         self.calibration_points = []
         self.calibration_step = 0
@@ -31,7 +33,7 @@ class EyeTrackerWidget(QWidget):
             "Look at CENTER and double‑blink",
         ]
 
-        # ─ Blink detection ────────────────────────────
+        # ─ Blink detection ───────────────────────────────
         self.LEFT_EYE  = [33,160,158,133,153,144]
         self.RIGHT_EYE = [362,385,387,263,373,380]
         self.blink_thresh = 0.21
@@ -41,7 +43,7 @@ class EyeTrackerWidget(QWidget):
         self.last_blink = 0
         self.ignore_after_blink = 0.3
 
-        # ─ Gaze & dwell ──────────────────────────────
+        # ─ Gaze smoothing & dwell ────────────────────────
         self.smoothed = None
         self.move_thr = 20
         self.alpha    = 0.3
@@ -49,36 +51,37 @@ class EyeTrackerWidget(QWidget):
         self.dwell_ts = 0
         self.last_click = 0
 
-        # Timer (not started yet)
+        # ─ UI setup ───────────────────────────────────────
+        self.instruction_label = QLabel(self.instructions[0], alignment=Qt.AlignCenter)
+        self.video_label       = QLabel(alignment=Qt.AlignCenter)
+        self.recalib_btn       = QPushButton("Re‑calibrate")
+        self.recalib_btn.clicked.connect(self.start_recalib)
+        self.settings_btn      = QPushButton("Settings")
+        self.settings_btn.clicked.connect(self.open_settings)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.instruction_label)
+        layout.addWidget(self.video_label, 1)
+        layout.addWidget(self.recalib_btn)
+        layout.addWidget(self.settings_btn)
+
+        # ─ Frame update timer ─────────────────────────────
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._update)
 
-        # ─ UI ─────────────────────────────────────────
-        self.instr = QLabel(self.instructions[0], alignment=Qt.AlignCenter)
-        self.video = QLabel(alignment=Qt.AlignCenter)
-        self.rc_btn = QPushButton("Re‑calibrate")
-        self.rc_btn.clicked.connect(self.start_recalib)
-        self.set_btn= QPushButton("Settings")
-        self.set_btn.clicked.connect(self.open_settings)
+        # ─ after calibration, shrink the preview ─────────
+        self.calibration_complete.connect(self._on_calibrated)
 
-        L = QVBoxLayout(self)
-        L.addWidget(self.instr)
-        L.addWidget(self.video, 1)
-        L.addWidget(self.rc_btn)
-        L.addWidget(self.set_btn)
-
-    def showEvent(self, e):
-        # start camera & timer when tab shown
+    def start_tracking(self):
         self.cap = cv2.VideoCapture(0)
         self.face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
         self.timer.start(30)
-        super().showEvent(e)
 
-    def hideEvent(self, e):
-        # stop camera & timer when tab hidden
+    def stop_tracking(self):
         self.timer.stop()
-        self.cap.release()
-        super().hideEvent(e)
+        if hasattr(self, 'cap') and self.cap:
+            self.cap.release()
+            self.cap = None
 
     def _get_iris(self, lm):
         p = lm[468]
@@ -91,10 +94,10 @@ class EyeTrackerWidget(QWidget):
         ix = max(minx, min(maxx, ix))
         iy = max(miny, min(maxy, iy))
         # invert horizontal so head-left → cursor-left
-        rx = 1 - (ix-minx)/(maxx-minx) if maxx!=minx else 0.5
-        ry =    (iy-miny)/(maxy-miny) if maxy!=miny else 0.5
+        rx = 1 - (ix - minx) / (maxx - minx) if maxx != minx else 0.5
+        ry =     (iy - miny) / (maxy - miny) if maxy != miny else 0.5
         sw, sh = pyautogui.size()
-        return int(rx*(sw-1)), int(ry*(sh-1))
+        return int(rx * (sw - 1)), int(ry * (sh - 1))
 
     def _ear(self, lm, ids):
         pts = [lm[i] for i in ids]
@@ -108,95 +111,98 @@ class EyeTrackerWidget(QWidget):
         if not ret:
             return
 
-        # mirror to match hand widget
-        frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        res = self.face_mesh.process(rgb)
-        now = time.time()
+        frame = cv2.flip(frame, 1)  # mirror so it feels natural
+        rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        res   = self.face_mesh.process(rgb)
+        now   = time.time()
 
         if res.multi_face_landmarks:
             lm  = res.multi_face_landmarks[0].landmark
-            ear = (self._ear(lm,self.LEFT_EYE)+self._ear(lm,self.RIGHT_EYE))/2
+            ear = (self._ear(lm,self.LEFT_EYE) + self._ear(lm,self.RIGHT_EYE)) / 2
 
-            # blink edge
-            if ear< self.blink_thresh and not self.is_blinking:
+            # detect blink edge
+            if ear < self.blink_thresh and not self.is_blinking:
                 self.is_blinking = True
-            elif ear>=self.blink_thresh and self.is_blinking:
+            elif ear >= self.blink_thresh and self.is_blinking:
                 self.is_blinking = False
                 self.last_blink = now
 
                 if not self.calibrated:
-                    # double blink → calibrate
+                    # double blink → calibration
                     self.blink_times.append(now)
-                    if len(self.blink_times)>2:
+                    if len(self.blink_times) > 2:
                         self.blink_times.pop(0)
                     if (len(self.blink_times)==2 and
                         self.blink_times[1]-self.blink_times[0]<self.double_window):
                         self.blink_times.clear()
-                        ix,iy = self._get_iris(lm)
-                        self.calibration_points.append((ix,iy))
-                        self.calibration_step +=1
-                        if self.calibration_step<5:
-                            self.instr.setText(self.instructions[self.calibration_step])
+                        ix, iy = self._get_iris(lm)
+                        self.calibration_points.append((ix, iy))
+                        self.calibration_step += 1
+                        if self.calibration_step < len(self.instructions):
+                            self.instruction_label.setText(self.instructions[self.calibration_step])
                         else:
-                            self.calibrated=True
-                            self.instr.setText("Calibration complete!")
+                            self.calibrated = True
+                            self.instruction_label.setText("Calibration complete!")
                             self.calibration_complete.emit()
                 else:
-                    # single blink → click
+                    # after calibration, single blink → click
                     pyautogui.click()
 
-            # gaze→cursor (skip right after blink)
-            if self.calibrated and (now-self.last_blink)>self.ignore_after_blink:
-                ix,iy = self._get_iris(lm)
-                tx,ty = self._map(ix,iy)
-                if not self.smoothed:
-                    self.smoothed, self.dwell_ts = (tx,ty),now
+            # gaze → cursor & dwell, skip immediately after blink
+            if self.calibrated and (now - self.last_blink) > self.ignore_after_blink:
+                ix, iy = self._get_iris(lm)
+                tx, ty = self._map(ix, iy)
+                if self.smoothed is None:
+                    self.smoothed, self.dwell_ts = (tx, ty), now
                 else:
-                    dx,dy = tx-self.smoothed[0],ty-self.smoothed[1]
-                    d = (dx*dx+dy*dy)**.5
-                    if d< self.move_thr:
-                        if (now-self.dwell_ts>self.dwell and
-                            now-self.last_click>self.dwell):
+                    dx, dy = tx - self.smoothed[0], ty - self.smoothed[1]
+                    dist = (dx*dx + dy*dy)**0.5
+                    if dist < self.move_thr:
+                        if now - self.dwell_ts > self.dwell and now - self.last_click > self.dwell:
                             pyautogui.click()
-                            self.last_click=now
+                            self.last_click = now
                     else:
-                        self.dwell_ts=now
-                        α = min(.85, max(self.alpha, d/300))
+                        self.dwell_ts = now
+                        α = min(0.85, max(self.alpha, dist/300))
                         sx = int(α*tx + (1-α)*self.smoothed[0])
                         sy = int(α*ty + (1-α)*self.smoothed[1])
-                        self.smoothed = (sx,sy)
-                        pyautogui.moveTo(sx,sy, duration=.08)
+                        self.smoothed = (sx, sy)
+                        pyautogui.moveTo(sx, sy, duration=0.08)
 
-        # preview
-        h,w,_ = frame.shape
-        img = QImage(frame.data,w,h,3*w,QImage.Format_RGB888).rgbSwapped()
-        self.video.setPixmap(QPixmap.fromImage(img))
+        # show preview
+        h, w, _ = frame.shape
+        img = QImage(frame.data, w, h, 3*w, QImage.Format_RGB888).rgbSwapped()
+        self.video_label.setPixmap(QPixmap.fromImage(img))
 
     def start_recalib(self):
-        self.calibrated=False
+        self.calibrated = False
         self.calibration_points.clear()
-        self.calibration_step=0
-        self.smoothed=None
-        self.instr.setText(self.instructions[0])
+        self.calibration_step = 0
+        self.smoothed = None
+        self.instruction_label.setText(self.instructions[0])
 
     def open_settings(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("Settings")
-        f = QFormLayout(dlg)
-        d = QDoubleSpinBox(); d.setRange(.2,3.0); d.setValue(self.dwell)
-        d.valueChanged.connect(lambda v:setattr(self,'dwell',v))
-        f.addRow("Dwell (s):",d)
-        m=QSpinBox(); m.setRange(1,100); m.setValue(self.move_thr)
-        m.valueChanged.connect(lambda v:setattr(self,'move_thr',v))
-        f.addRow("Move thr:",m)
-        a=QDoubleSpinBox(); a.setRange(.01,.99); a.setSingleStep(.01)
-        a.setValue(self.alpha); a.valueChanged.connect(lambda v:setattr(self,'alpha',v))
-        f.addRow("Smooth α:",a)
-        btn=QPushButton("Close"); btn.clicked.connect(dlg.close)
-        f.addRow(btn)
+        form = QFormLayout(dlg)
+        dwell = QDoubleSpinBox(); dwell.setRange(0.2,3.0); dwell.setValue(self.dwell)
+        dwell.valueChanged.connect(lambda v: setattr(self,'dwell',v))
+        form.addRow("Dwell (s):", dwell)
+        thr = QSpinBox(); thr.setRange(1,100); thr.setValue(self.move_thr)
+        thr.valueChanged.connect(lambda v: setattr(self,'move_thr',v))
+        form.addRow("Move threshold:", thr)
+        αspin = QDoubleSpinBox(); αspin.setRange(0.01,0.99); αspin.setSingleStep(0.01)
+        αspin.setValue(self.alpha); αspin.valueChanged.connect(lambda v: setattr(self,'alpha',v))
+        form.addRow("Smoothing α:", αspin)
+        btn = QPushButton("Close"); btn.clicked.connect(dlg.close)
+        form.addRow(btn)
         dlg.exec_()
 
-    def closeEvent(self,e):
-        self.cap.release()
-        super().closeEvent(e)
+    def _on_calibrated(self):
+        # shrink the preview widget down into a corner
+        self.video_label.setFixedSize(200, 150)
+        self.video_label.setScaledContents(True)
+
+    def closeEvent(self, event):
+        self.stop_tracking()
+        super().closeEvent(event)

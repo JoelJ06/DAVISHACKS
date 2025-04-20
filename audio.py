@@ -12,6 +12,7 @@ import queue
 import pyaudio
 import wave
 from elevenlabs import ElevenLabs
+import agent 
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,9 +22,9 @@ CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
-WAKE_WORD = "Steven"
+WAKE_WORD = "steven"
 SILENCE_THRESHOLD = int(os.getenv("SOUND_THRESHOLD"))  # Adjust based on your microphone and environment
-SILENCE_DURATION = 4.0   # Seconds of silence to end recording
+SILENCE_DURATION = 3.0   # Seconds of silence to end recording
 
 # Initialize ElevenLabs client
 client = ElevenLabs(
@@ -54,6 +55,7 @@ class VoiceAssistant:
         self.silent_chunks = 0
         self.chunks_per_second = RATE / CHUNK
         self.silent_chunks_threshold = int(SILENCE_DURATION * self.chunks_per_second)
+        self.gemini_agent = agent.geminiAgent()
         
     def transcribe_with_elevenlabs(self, audio_file):
         """Transcribe audio file using ElevenLabs API."""
@@ -128,7 +130,7 @@ class VoiceAssistant:
         """Process audio queue to detect wake word"""
         # Buffer to accumulate audio data
         audio_buffer = []
-        buffer_max_size = int(RATE / CHUNK * 1000)  # 5 seconds of audio
+        buffer_max_size = int(RATE / CHUNK * 100)  # 5 seconds of audio
         
         while self.listening_for_wake_word and not self.exit_requested:
             try:
@@ -141,7 +143,7 @@ class VoiceAssistant:
                     audio_buffer.pop(0)
                 
                 # Process audio every 0.5 seconds
-                if len(audio_buffer) % (buffer_max_size // 500) == 0:
+                if len(audio_buffer) % (buffer_max_size // 200) == 0:
                     # Convert buffer to audio data
                     audio = b''.join(audio_buffer)
                     
@@ -261,7 +263,7 @@ class VoiceAssistant:
         
         # Clean up
         os.remove(temp_filename)
-        
+        self.gemini_agent.run()
         # Return to listening for wake word
         self.start_listening_for_wake_word()
 
