@@ -11,8 +11,10 @@ from PyQt5.QtGui     import QImage, QPixmap
 
 class ClickController:
     def __init__(self):
-        self.down   = False
+        self.down = False
         self.thresh = 40
+        self.scroll_mode = False
+        self.last_y = None
 
     def update(self, thumb_pos, index_pos):
         d = np.hypot(thumb_pos[0]-index_pos[0], thumb_pos[1]-index_pos[1])
@@ -25,8 +27,9 @@ class ClickController:
         elif not self.down and prev:
             pyautogui.mouseUp()
         
-        self.scroll_mode = False
-        self.last_y = None
+        # Removed reset of scroll state to fix scrolling
+        # self.scroll_mode = False
+        # self.last_y = None
             
     def update_with_landmarks(self, tp, ip, landmarks):
         # First process basic click detection
@@ -37,26 +40,43 @@ class ClickController:
         middle_tip = landmarks.landmark[12]
         pinch_distance = np.hypot(pointer_tip.x - middle_tip.x, pointer_tip.y - middle_tip.y)
         
-        if pinch_distance < 0.05:  # Threshold for pinch detection
-            # We're in scroll mode
-            current_y = (pointer_tip.y + middle_tip.y) / 2  # Average Y position
-            
-            if self.scroll_mode and self.last_y is not None:
-                # Calculate scroll amount
+        if pinch_distance < 0.05:  # Changed from 50 to 0.05 for normalized coordinates
+            # We're in scroll mode - use the position of the paired fingers for scrolling
+            if self.last_y is None:
+                self.last_y = (pointer_tip.y + middle_tip.y) / 2
+                self.scroll_mode = True
+            else:
+                # Get current y position of the pinched fingers
+                current_y = (pointer_tip.y + middle_tip.y) / 2
+                
+                # Calculate movement since last frame
                 y_diff = current_y - self.last_y
-                if abs(y_diff) > 0.01:  # Threshold to prevent tiny movements
-                    scroll_amount = int(y_diff * 200)  # Adjust sensitivity
+                
+                # Scale the difference for smoother scrolling
+                scroll_amount = int(y_diff * 100)  # Increased from 200 to 1000 for better responsiveness
+                
+                # Apply scrolling - negative because moving hand down should scroll down
+                if abs(scroll_amount) > 1:  # Add threshold to avoid tiny movements
                     pyautogui.scroll(-scroll_amount)
+                
+                # Update last position
+                self.last_y = current_y
             
-            self.last_y = current_y
-            self.scroll_mode = True
-            # Cancel any click that was detected
+            # Temporarily suppress clicks during scroll without disrupting click state
             if self.down:
-                pyautogui.mouseUp()
-        
+                pyautogui.mouseUp()  # Release temporarily while scrolling
+                
+            self.scroll_mode = True
+        else:
+            # Not in scroll mode anymore
+            if self.scroll_mode and self.down:
+                # Restore mouse down state if needed when exiting scroll mode
+                pyautogui.mouseDown()
             
-            self.scroll_mode = False
-            self.last_y = None
+            # Reset scroll state
+            if self.scroll_mode:
+                self.scroll_mode = False
+                self.last_y = None
 
 class HandTrackerWidget(QWidget):
     def __init__(self):
@@ -68,11 +88,11 @@ class HandTrackerWidget(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._frame)
 
-        self.ctrl       = ClickController()
+        self.ctrl = ClickController()
         self.screen_w, self.screen_h = pyautogui.size()
 
     def start_tracking(self):
-        self.cap   = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(0)
         self.hands = mp.solutions.hands.Hands(
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
@@ -117,10 +137,18 @@ class HandTrackerWidget(QWidget):
                     cv2.circle(fr, (ix, iy), 10, (0,255,0), -1)
                     left_found = True
                 else:
-                    # right hand triggers click
-                    self.ctrl.update((tx,ty), (ix,iy))
+                    # right hand triggers click and scroll
+                    self.ctrl.update_with_landmarks((tx,ty), (ix,iy), lm)  # Changed from update to update_with_landmarks
+                    
+                    # Draw line between thumb and index (for clicking)
                     clr = (0,0,255) if self.ctrl.down else (0,255,0)
                     cv2.line(fr, (ix,iy), (tx,ty), clr, 3)
+                    
+                    # Draw line between index and middle finger (for scrolling)
+                    middle_x, middle_y = int(lm.landmark[12].x * w), int(lm.landmark[12].y * h)
+                    scroll_distance = np.hypot(ix - middle_x, iy - middle_y)
+                    scroll_color = (255,0,0) if scroll_distance < 40 else (255,255,0)
+                    cv2.line(fr, (ix,iy), (middle_x, middle_y), scroll_color, 3)
 
         if not left_found:
             # lift click if no left hand present
