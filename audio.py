@@ -21,8 +21,8 @@ CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
-WAKE_WORD = "amazing"
-SILENCE_THRESHOLD = 1000  # Adjust based on your microphone and environment
+WAKE_WORD = "Steven"
+SILENCE_THRESHOLD = int(os.getenv("SOUND_THRESHOLD"))  # Adjust based on your microphone and environment
 SILENCE_DURATION = 4.0   # Seconds of silence to end recording
 
 # Initialize ElevenLabs client
