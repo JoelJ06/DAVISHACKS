@@ -42,11 +42,6 @@ POPULAR_SITES = {
     'google': 'https://www.google.com',
 }
 
-# General close keywords
-GENERAL_CLOSE_KEYWORDS = [
-    'close window', 'close the window', 'close program', 'close the program',
-    'exit window', 'exit program', 'exit the window', 'exit the program'
-]
 
 # Scroll helpers
 SCROLL_SYNONYMS = {'down': -1, 'up': 1}
@@ -131,83 +126,20 @@ def handle_chrome_command(text):
         return True
     return False
 
-def handle_general_close_command(text):
-    text = text.lower()
-    for kw in GENERAL_CLOSE_KEYWORDS:
-        if kw in text:
-            if IS_WINDOWS:
-                pyautogui.hotkey('alt', 'f4')
-            elif IS_MAC:
-                pyautogui.hotkey('command', 'shift', 'w')
-            return True
-    return False
-
-def parse_type_command(text):
-    text = text.lower()
-    match = re.match(r'(please )?(type|type out) (.+)', text)
-    if match:
-        return match.group(3)
-    return None
-
-def handle_type_command(text):
-    phrase = parse_type_command(text)
-    if phrase:
-        pyautogui.write(phrase)
-        pyautogui.press('enter')
-        return True
-    return False
-
-def open_app_or_website(text):
-    text = text.lower()
-    # Open popular site
-    for site, url in POPULAR_SITES.items():
-        if site in text:
-            if CHROME_PATH:
-                if IS_WINDOWS:
-                    subprocess.Popen([CHROME_PATH, url])
-                elif IS_MAC:
-                    subprocess.Popen(['open', '-a', 'Google Chrome', url])
-            else:
-                import webbrowser
-                webbrowser.open(url)
-            return
-    # Open app
-    for app, cmd in APP_COMMANDS.items():
-        if app in text and cmd:
-            if IS_WINDOWS:
-                subprocess.Popen(cmd if isinstance(cmd, list) else [cmd])
-            elif IS_MAC:
-                if app == 'chrome':
-                    subprocess.Popen(['open', '-a', 'Google Chrome'])
-                elif cmd.startswith('open -a'):
-                    subprocess.Popen(cmd.split())
-                else:
-                    subprocess.Popen(['open', '-a', app.capitalize()])
-            return
-    # Open URL
-    if any(ext in text for ext in ['.com', '.org', '.net']):
-        url = text if text.startswith('http') else 'https://' + text.replace(' ', '')
-        if CHROME_PATH:
-            if IS_WINDOWS:
-                subprocess.Popen([CHROME_PATH, url])
-            elif IS_MAC:
-                subprocess.Popen(['open', '-a', 'Google Chrome', url])
-        else:
-            import webbrowser
-            webbrowser.open(url)
-        return
-    # Try to open as a system app
-    try:
-        if IS_WINDOWS:
-            os.startfile(text)
-        elif IS_MAC:
-            subprocess.Popen(['open', '-a', text.capitalize()])
-    except Exception as e:
-        print(f"Could not open application or website '{text}': {e}")
-
 class geminiAgent():
     def __init__(self):
         self.client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
+
+    def cleanup(self):
+        """Release resources used by the agent"""
+        # Close any open client sessions
+        if hasattr(self, 'client') and self.client is not None:
+            # Most API clients have a close() method
+            if hasattr(self.client, 'close') and callable(self.client.close):
+                self.client.close()
+            # Set to None to help garbage collection
+            self.client = None
+        print("Agent resources cleaned up")
 
     def extract_open_intents(self, transcript_path: str):
         with open(transcript_path, 'r') as f:
@@ -217,8 +149,14 @@ class geminiAgent():
             "You are an accessibility assistant.  Parse the user's transcript "
             "and extract every command to open an application. Correct spelling if necessary, to the appropriate full application name."
             "As an example, chrome should autocorrect to Google Chrome."
+            "The commands are open, scroll, type, close."
+            "Synonyms of commands should also be corrected to the command itself."
+            "Prune unnecessary words from the command, such as 'open the app' to 'open app'."
+            "When the command is 'close', automatically convert websites to 'tab' and browser names to 'window'."
+            "Make sure everything is lowercase"
             "Return only a JSON object with two arrays: "
-            "\"actions\": [...], \"apps\": [...]."
+            "The actions array should contain the commands, and the arguments array should contain the arguments."
+            "\"actions\": [...], \"arguments\": [...]."
         )
         user = f"Transcript:\n{transcript}\n\nReply **only** with that JSON."
 
@@ -233,8 +171,67 @@ class geminiAgent():
         if not m:
             return [], []
         data = json.loads(m.group(0))
-        return data.get('actions', []), data.get('apps', [])
+        return data.get('actions', []), data.get('arguments', [])
+    
+    def type_command(self, args):
+        pyautogui.write(args)
+        pyautogui.press('enter')
+    
+    def is_chrome_focused():
+        if IS_WINDOWS:
+            try:
+                import win32gui
+                hwnd = win32gui.GetForegroundWindow()
+                window_title = win32gui.GetWindowText(hwnd).lower()
+                return 'chrome' in window_title
+            except Exception:
+                return False
+        elif IS_MAC:
+            try:
+                import AppKit
+                active_app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication().localizedName().lower()
+                return 'chrome' in active_app
+            except Exception:
+                return False
+        return False
 
+    def scroll_command(self, args):
+        match = re.search(r'scroll (up|down)(?: (a lot|a little|lot|little|\d+|one|two|three|four|five|six|seven|eight|nine|ten)?(?: times?)?)?', args)
+        if not match:
+            return None
+        direction = match.group(1)
+        amount_word = match.group(2) or ''
+        if amount_word in SCROLL_INTENSITY:
+            scroll_amt = SCROLL_INTENSITY[amount_word]
+            times = 1
+        elif amount_word.isdigit():
+            scroll_amt = SCROLL_INTENSITY['']
+            times = int(amount_word)
+        elif amount_word in NUMBER_WORDS:
+            scroll_amt = SCROLL_INTENSITY['']
+            times = NUMBER_WORDS[amount_word]
+        else:
+            scroll_amt = SCROLL_INTENSITY['']
+            times = 1
+        scroll_amt = scroll_amt * SCROLL_SYNONYMS[direction]
+        for _ in range(times):
+            pyautogui.scroll(scroll_amt)
+            time.sleep(0.1)
+    
+    def close_app(self, app_name: str):
+        system = platform.system()
+        
+        if app_name == 'window' and system == 'Windows':
+            pyautogui.hotkey('alt', 'f4')
+        elif app_name == 'window' and system == 'Darwin':
+            pyautogui.hotkey('command', 'shift', 'w')
+        elif app_name == 'tab' and system == 'Windows': 
+            pyautogui.hotkey('ctrl', 'w')
+        elif app_name == 'tab' and system == 'Darwin':
+            pyautogui.hotkey('command', 'w')
+        
+        
+        
     def open_app(self, app_name: str):
         """
         Cross‑platform app/URL opener.
@@ -247,9 +244,16 @@ class geminiAgent():
         
         # If it's a well‑known web app, open in browser:
         web_apps = {'facebook', 'youtube', 'twitter'}
-        if app_name.lower() in web_apps:
+        if app_name in web_apps:
             import webbrowser
             webbrowser.open(f'https://www.{app_name.lower()}.com')
+            return
+        chrome = is_chrome_focused()
+        if app_name == 'tab' and system == 'Windows':
+            pyautogui.hotkey('ctrl', 't')
+            return
+        elif app_name == 'tab' and system == 'Darwin':
+            pyautogui.hotkey('command', 't')
             return
         
         try:
@@ -263,13 +267,31 @@ class geminiAgent():
                 subprocess.Popen(['xdg-open', app_name])
         except Exception as e:
             print(f"❌ Failed to open {app_name} on {system}: {e}")
-
+            
+    
+    def handle_transcript(self, actions, apps):
+      # Try all command handlers in order
+      if actions.lower() == 'type':
+          self.type_command(apps.lower())
+          return
+      if actions.lower() == 'scroll':
+          self.scroll_command(apps.lower())
+          return
+      if actions.lower() == 'open':
+        self.open_app(apps.lower())
+        return
+      if actions.lower() == 'close':
+        self.close_app(apps.lower())
+        return
+    
+      
     def run(self):
         # os.environ.setdefault("GEMINI_API_KEY", "<YOUR_KEY_HERE>")
-        actions, apps = self.extract_open_intents("transcription.txt")
+        actions, args = self.extract_open_intents("transcription.txt")
         print("Actions:", actions)
-        print("  Apps: ", apps)
-
-        for act, app in zip(actions, apps):
-            if act.lower() == 'open':
-                self.open_app(app)
+        print("  Args: ", args)
+    
+        for act, args in zip(actions, args):
+            self.handle_transcript(act, args)
+        
+        return actions, args  # Return the results for potential further processing
