@@ -78,6 +78,7 @@ class VoiceAssistant:
     def start(self):
         """Start the voice assistant"""
         self.exit_requested = False
+        self.cycle_count = 0
         
         # Start listening for wake word
         self.start_listening_for_wake_word()
@@ -86,10 +87,26 @@ class VoiceAssistant:
         try:
             while not self.exit_requested:
                 time.sleep(0.1)  # Sleep to prevent CPU hogging
+                
+                # Periodically recycle resources to prevent memory leaks
+                self.cycle_count += 1
+                if self.cycle_count > 1000:  # Every ~100 seconds
+                    self.recycle_resources()
+                    self.cycle_count = 0
+                    
         except KeyboardInterrupt:
             print("\nStopping voice assistant.")
         finally:
             self.stop()
+            
+    def recycle_resources(self):
+        """Periodically clean up and reset resources to prevent memory buildup"""
+        if not self.recording_active:  # Only recycle when not actively recording
+            print("Performing resource cleanup...")
+            self.stop_wake_word_detection()
+            # Small delay to ensure proper cleanup
+            time.sleep(0.5)
+            self.start_listening_for_wake_word()
             
     def stop(self):
         """Stop the voice assistant and clean up resources"""
@@ -97,10 +114,25 @@ class VoiceAssistant:
         if self.stream:
             self.stream.stop_stream()
             self.stream.close()
+            self.stream = None  # Add this line
         self.p.terminate()
+        
+        # Clear queues and buffers
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+        self.recording_frames = []
             
     def start_listening_for_wake_word(self):
         """Start listening for the wake word"""
+        # Clean up previous threads if they exist
+        if hasattr(self, 'wake_word_thread') and self.wake_word_thread.is_alive():
+            # Give the thread time to terminate
+            self.listening_for_wake_word = False
+            time.sleep(0.5)
+        
         print(f"Listening for wake word: '{WAKE_WORD}'...")
         self.listening_for_wake_word = True
         self.recording_active = False
@@ -117,9 +149,9 @@ class VoiceAssistant:
         self.stream.start_stream()
         
         # Start wake word detection thread
-        wake_word_thread = threading.Thread(target=self._detect_wake_word)
-        wake_word_thread.daemon = True
-        wake_word_thread.start()
+        self.wake_word_thread = threading.Thread(target=self._detect_wake_word)
+        self.wake_word_thread.daemon = True
+        self.wake_word_thread.start()
     
     def _wake_word_callback(self, in_data, frame_count, time_info, status):
         """Audio callback for wake word detection mode"""
@@ -130,7 +162,7 @@ class VoiceAssistant:
         """Process audio queue to detect wake word"""
         # Buffer to accumulate audio data
         audio_buffer = []
-        buffer_max_size = int(RATE / CHUNK * 100)  # 5 seconds of audio
+        buffer_max_size = int(RATE / CHUNK * 5)  # Reduced from 1000 to 5 seconds
         
         while self.listening_for_wake_word and not self.exit_requested:
             try:
@@ -143,7 +175,7 @@ class VoiceAssistant:
                     audio_buffer.pop(0)
                 
                 # Process audio every 0.5 seconds
-                if len(audio_buffer) % (buffer_max_size // 200) == 0:
+                if len(audio_buffer) % (buffer_max_size // 10) == 0:
                     # Convert buffer to audio data
                     audio = b''.join(audio_buffer)
                     
@@ -182,6 +214,7 @@ class VoiceAssistant:
         # Clear previous recording frames
         self.recording_frames = []
         self.silent_chunks = 0
+        self.silence_start_time = None  # Track when silence begins
         self.recording_active = True
         
         # Start new audio stream for recording
@@ -209,25 +242,37 @@ class VoiceAssistant:
             # Store audio frame
             self.recording_frames.append(in_data)
             
-            # Check for silence
+            # Check for silence using RMS value
             rms = audioop.rms(in_data, 2)  # 2 bytes per sample for paInt16
             
+            # Current time for absolute timing
+            current_time = time.time()
+            
             if rms < SILENCE_THRESHOLD:
-                self.silent_chunks += 1
-                # Print silence progress every second
-                if self.silent_chunks % int(self.chunks_per_second) == 0:
-                    seconds = self.silent_chunks / self.chunks_per_second
-                    print(f"Silence detected for {seconds:.1f}s")
-                
-                # Check if silence duration threshold reached
-                if self.silent_chunks >= self.silent_chunks_threshold:
-                    print(f"\nSilence threshold reached ({SILENCE_DURATION}s). Stopping recording.")
-                    self.recording_active = False
+                # If this is the start of silence, record the timestamp
+                if self.silence_start_time is None:
+                    self.silence_start_time = current_time
+                    self.silent_chunks = 1  # Keep this for backward compatibility
+                    print("Silence detected, starting timer...")
+                else:
+                    # Calculate silence duration from absolute timestamps
+                    silence_duration = current_time - self.silence_start_time
+                    self.silent_chunks += 1  # Keep updating for backward compatibility
+                    
+                    # Print silence progress every second (approximately)
+                    if self.silent_chunks % int(self.chunks_per_second) == 0:
+                        print(f"Silence detected for {silence_duration:.1f}s")
+                    
+                    # Check if silence duration threshold reached using absolute time
+                    if silence_duration >= SILENCE_DURATION:
+                        print(f"\nSilence threshold reached ({silence_duration:.1f}s). Stopping recording.")
+                        self.recording_active = False
             else:
-                # Reset counter if sound detected
-                if self.silent_chunks > 0:
-                    print("Sound detected, resetting silence counter.")
-                self.silent_chunks = 0
+                # Reset timer if sound detected
+                if self.silence_start_time is not None:
+                    print("Sound detected, resetting silence timer.")
+                    self.silence_start_time = None
+                    self.silent_chunks = 0
         
         return (in_data, pyaudio.paContinue)
     
@@ -279,7 +324,7 @@ def run_assistant():
     
     assistant = VoiceAssistant()
     assistant.start()
-
+      
 def main():
     print("Voice Assistant with Wake Word and Silence Detection")
     print("==================================================")
