@@ -11,14 +11,53 @@ class ClickController:
     def __init__(self):
         self.down = False
         self.thresh = 40
+        self.scroll_mode = False
+        self.last_y = None
+        self.scroll_thresh = 20  # Minimum vertical movement to trigger scroll
+
     def update(self, tp, ip):
         d = np.hypot(tp[0]-ip[0], tp[1]-ip[1])
         prev = self.down
         self.down = d < self.thresh
+        
+        # Handle regular clicking
         if self.down and not prev:
             pyautogui.mouseDown()
         elif not self.down and prev:
             pyautogui.mouseUp()
+        
+        self.scroll_mode = False
+        self.last_y = None
+            
+    def update_with_landmarks(self, tp, ip, landmarks):
+        # First process basic click detection
+        self.update(tp, ip)
+        
+        # Check if pointer and middle fingers are pinched for scrolling
+        pointer_tip = landmarks.landmark[8]
+        middle_tip = landmarks.landmark[12]
+        pinch_distance = np.hypot(pointer_tip.x - middle_tip.x, pointer_tip.y - middle_tip.y)
+        
+        if pinch_distance < 0.05:  # Threshold for pinch detection
+            # We're in scroll mode
+            current_y = (pointer_tip.y + middle_tip.y) / 2  # Average Y position
+            
+            if self.scroll_mode and self.last_y is not None:
+                # Calculate scroll amount
+                y_diff = current_y - self.last_y
+                if abs(y_diff) > 0.01:  # Threshold to prevent tiny movements
+                    scroll_amount = int(y_diff * 200)  # Adjust sensitivity
+                    pyautogui.scroll(-scroll_amount)
+            
+            self.last_y = current_y
+            self.scroll_mode = True
+            # Cancel any click that was detected
+            if self.down:
+                pyautogui.mouseUp()
+        
+            
+            self.scroll_mode = False
+            self.last_y = None
 
 class HandTrackerWidget(QWidget):
     def __init__(self):
@@ -78,8 +117,8 @@ class HandTrackerWidget(QWidget):
                     cv2.circle(fr,(ix,iy),10,(0,255,0),-1)
                     left_found=True
                 else:
-                    # right label→ click
-                    self.ctrl.update((tx,ty),(ix,iy))
+                    # right label→ click and scroll
+                    self.ctrl.update_with_landmarks((tx,ty),(ix,iy), lm)
                     clr = (0,0,255) if self.ctrl.down else (0,255,0)
                     cv2.line(fr,(ix,iy),(tx,ty),clr,3)
 
