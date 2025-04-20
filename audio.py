@@ -130,7 +130,7 @@ class VoiceAssistant:
         """Process audio queue to detect wake word"""
         # Buffer to accumulate audio data
         audio_buffer = []
-        buffer_max_size = int(RATE / CHUNK * 1000)  # 5 seconds of audio
+        buffer_max_size = int(RATE / CHUNK * 100)  # 5 seconds of audio
         
         while self.listening_for_wake_word and not self.exit_requested:
             try:
@@ -143,7 +143,7 @@ class VoiceAssistant:
                     audio_buffer.pop(0)
                 
                 # Process audio every 0.5 seconds
-                if len(audio_buffer) % (buffer_max_size // 500) == 0:
+                if len(audio_buffer) % (buffer_max_size // 200) == 0:
                     # Convert buffer to audio data
                     audio = b''.join(audio_buffer)
                     
