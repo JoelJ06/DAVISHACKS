@@ -9,3 +9,4 @@ PyQt5>=5.15.0
 pyautogui>=0.9.53
 pymongo[srv]
 google-generativeai
+simpleaudio

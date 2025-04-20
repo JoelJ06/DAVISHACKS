@@ -154,9 +154,12 @@ class geminiAgent():
             "Prune unnecessary words from the command, such as 'open the app' to 'open app'."
             "When the command is 'close', automatically convert websites to 'tab' and browser names to 'window'."
             "Make sure everything is lowercase"
-            "Return only a JSON object with two arrays: "
-            "The actions array should contain the commands, and the arguments array should contain the arguments."
-            "\"actions\": [...], \"arguments\": [...]."
+            "Return only a JSON object with three arrays: "
+            "The actions array should contain the commands, and the arguments array should contain the arguments." \
+            "Add a response back from the AI agent confirming the actions taken."
+            "The blannk should include the command executed and the argument used."
+            "Example: Okay, I've __ for you."
+            "\"actions\": [...], \"arguments\": [...]., \"response\": [...].}"
         )
         user = f"Transcript:\n{transcript}\n\nReply **only** with that JSON."
 
@@ -171,7 +174,7 @@ class geminiAgent():
         if not m:
             return [], []
         data = json.loads(m.group(0))
-        return data.get('actions', []), data.get('arguments', [])
+        return data.get('actions', []), data.get('arguments', []), data.get('response', [])
     
     def type_command(self, args):
         pyautogui.write(args)
@@ -287,11 +290,11 @@ class geminiAgent():
       
     def run(self):
         # os.environ.setdefault("GEMINI_API_KEY", "<YOUR_KEY_HERE>")
-        actions, args = self.extract_open_intents("transcription.txt")
+        actions, args, response = self.extract_open_intents("transcription.txt")
         print("Actions:", actions)
         print("  Args: ", args)
-    
+        print("Response:", [response])
         for act, args in zip(actions, args):
             self.handle_transcript(act, args)
         
-        return actions, args  # Return the results for potential further processing
+        return actions, args, response # Return the results for potential further processing

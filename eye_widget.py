@@ -94,7 +94,7 @@ class EyeTrackerWidget(QWidget):
         ix = max(minx, min(maxx, ix))
         iy = max(miny, min(maxy, iy))
         # invert horizontal so head-left → cursor-left
-        rx = 1 - (ix - minx) / (maxx - minx) if maxx != minx else 0.5
+        rx = (ix - minx) / (maxx - minx) if maxx != minx else 0.5
         ry =     (iy - miny) / (maxy - miny) if maxy != miny else 0.5
         sw, sh = pyautogui.size()
         return int(rx * (sw - 1)), int(ry * (sh - 1))

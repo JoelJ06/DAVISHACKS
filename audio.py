@@ -11,7 +11,7 @@ import threading
 import queue
 import pyaudio
 import wave
-from elevenlabs import ElevenLabs
+from elevenlabs import ElevenLabs, play 
 import agent 
 
 # Load environment variables from .env file
@@ -301,17 +301,16 @@ class VoiceAssistant:
         
         if transcript:
             print("\nTranscript:")
-            print(transcript)
+            priqnt(transcript)
             # Here you could process the transcript or take actions
         else:
             print("\nNo transcript obtained or error occurred.")
         
         # Clean up
         os.remove(temp_filename)
-        self.gemini_agent.run()
-        # Return to listening for wake word
-        self.start_listening_for_wake_word()
+        _, _, response = self.gemini_agent.run()
 
+    
 def run_assistant():
     """Run the voice assistant with wake word detection and silence detection."""
     # Get API key from environment variable
