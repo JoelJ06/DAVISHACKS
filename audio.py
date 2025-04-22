@@ -301,7 +301,7 @@ class VoiceAssistant:
         
         if transcript:
             print("\nTranscript:")
-            priqnt(transcript)
+            print(transcript)
             # Here you could process the transcript or take actions
         else:
             print("\nNo transcript obtained or error occurred.")
