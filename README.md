@@ -1,6 +1,7 @@
 # Steven.ai
-A hands-free accessibility interface that leverages eye gaze, hand gestures, and voice commands to empower users with upper-body mobility challenges.
+Steven.ai is an AI-powered accessibility assistant that enables hands-free computer control for users with limited mobility by combining eye gaze tracking, natural language understanding, and multimodal input. This is a fork of the repository of the project we worked togther.
 
+Role: Machine Learning Developer — Led the design and implementation of ML models for real-time gaze tracking and intent recognition, integrating LLMs and multimodal APIs to enhance accessibility and user independence.
 ## Installation
 
 ### 1. Clone the repository
